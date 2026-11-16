@@ -103,7 +103,8 @@ fn road_routes_follow_connected_geometry_and_preserve_height() {
     assert!(points.iter().any(|p| p["x"] == 20. && p["y"] == 0.));
     assert!(points.iter().all(|p| p["z"] == 0.));
     assert_eq!(graph.snap(&start, Some(10.)).unwrap()["position"]["z"], 10.);
-    assert!(graph.path(&start, &end, Some(10.)).is_err());
+    // Explicit endpoint elevations take precedence over the fallback height.
+    assert_eq!(graph.path(&start, &end, Some(10.)).unwrap(), result);
 }
 
 #[test]
@@ -112,7 +113,7 @@ fn builds_audited_documents_transactionally_and_rejects_existing_output() {
     let temporary = tempfile::tempdir().unwrap();
     let output = temporary.path().join("race");
     let report = compile::generate(&config, &route, &output, None, None).unwrap();
-    assert_eq!(report["resource_count"], 16);
+    assert_eq!(report["resource_count"], 31);
     assert_eq!(report["native"], false);
     let saved = compile::read_json(&output.join("race.json")).unwrap();
     assert_eq!(saved["route"], "route.json");
@@ -153,7 +154,7 @@ fn generates_full_grid_forced_vehicle_diagnostics_and_vanilla_checkpoints() {
     let directory = tempfile::tempdir().unwrap();
     let report =
         compile::generate(&config, &route, &directory.path().join("grid"), None, None).unwrap();
-    assert_eq!(report["resource_count"], 12);
+    assert_eq!(report["resource_count"], 93);
     assert_eq!(report["bindings"]["entrants"].as_array().unwrap().len(), 12);
     assert!(report["bindings"]["supplied_player_vehicle"].is_string());
 }

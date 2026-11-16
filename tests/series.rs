@@ -234,7 +234,7 @@ fn nine_unique_wins_unlock_in_order_pay_once_and_keep_replays_alive() {
     assert_eq!(bootstrap.phases.len(), 1);
     assert_eq!(bootstrap.phases[0].input, "In1");
     assert!(bootstrap.phases[0].output.is_none());
-    assert!(bootstrap.workspot_count() > 0);
+    assert_eq!(bootstrap.workspot_count(), 0);
     let mut all_nodes = Vec::new();
     for artifact in build.artifacts.values() {
         objects(artifact, &mut all_nodes);
@@ -251,7 +251,7 @@ fn nine_unique_wins_unlock_in_order_pay_once_and_keep_replays_alive() {
         );
     }
     assert!(bootstrap.phases[0].resource.ends_with("_series.questphase"));
-    let scene = &build.artifacts["base\\open_world\\scenes\\generic_vendors\\versions\\gold\\chinese_food_store.scene"];
+    let scene = &build.artifacts["mod\\quest_bootstrap\\championship_test\\start.scene"];
     let scene_definitions = definitions(scene);
     let calls = scene_definitions
         .values()
@@ -292,7 +292,13 @@ fn nine_unique_wins_unlock_in_order_pay_once_and_keep_replays_alive() {
             );
             assert!(!controller.facts.contains_key(&next.unlock_fact()));
         }
+        // Model the child race arming its start trigger and finishing cleanup.
+        controller.facts.insert(format!("{id}_waiting_armed"), 1);
+        controller.pump();
         controller.facts.insert(membership.win_fact(), 1);
+        controller.pump();
+        assert_eq!(controller.cash, 0);
+        controller.facts.insert(format!("{id}_settled"), 1);
         controller.pump();
         // Replaying an earlier event cannot replace the next distinct win.
         controller.facts.insert(

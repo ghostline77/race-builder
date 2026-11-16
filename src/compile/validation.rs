@@ -259,7 +259,11 @@ fn scene(root: &Value, defs: &HashMap<&str, &Value>) -> Result<()> {
                 let id = value["id"].as_u64().context("Performer reference")?;
                 ensure!(
                     id == u64::from(ghostline_quest_builder::scene::INVALID_PERFORMER_ID)
-                        || root["props"].as_array().into_iter().flatten().any(|p|p["propId"]["id"].as_u64().map(|v|v*256+2)==Some(id))
+                        || root["props"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|p| p["propId"]["id"].as_u64().map(|v| v * 256 + 2) == Some(id))
                         || actors
                             .iter()
                             .any(|a| a["actorId"]["id"].as_u64().map(|v| v * 256 + 1) == Some(id)),
@@ -401,21 +405,44 @@ pub fn resources(artifacts: &Artifacts, bindings: &Value) -> Result<()> {
         let root = &document["Data"]["RootChunk"];
         match root["$type"].as_str() {
             Some("worldStreamingBlock") => {
-                for descriptor in root["descriptors"].as_array().context("Streaming descriptors")? {
-                    let sector_path = name(&descriptor["data"]["DepotPath"])
-                        .context("Streaming sector path")?;
-                    let sector = &artifacts.get(sector_path)
-                        .with_context(|| format!("Missing streaming sector {sector_path}"))?["Data"]["RootChunk"];
-                    let ranges = sector["variantIndices"].as_array()
+                for descriptor in root["descriptors"]
+                    .as_array()
+                    .context("Streaming descriptors")?
+                {
+                    let sector_path =
+                        name(&descriptor["data"]["DepotPath"]).context("Streaming sector path")?;
+                    // The startup block streams the game's vendor sector alongside its own.
+                    // Quest Builder patches that stock sector when writing the native archive.
+                    if depot.starts_with(r"mod\quest_bootstrap\")
+                        && sector_path
+                            == r"base\worlds\03_night_city\_compiled\default\exterior_-10_16_0_1.streamingsector"
+                        && !artifacts.contains_key(sector_path)
+                    {
+                        continue;
+                    }
+                    let sector = &artifacts
+                        .get(sector_path)
+                        .with_context(|| format!("Missing streaming sector {sector_path}"))?["Data"]
+                        ["RootChunk"];
+                    let ranges = sector["variantIndices"]
+                        .as_array()
                         .context("Streaming sector node ranges")?;
-                    let declared = descriptor["numNodeRanges"].as_u64()
+                    let declared = descriptor["numNodeRanges"]
+                        .as_u64()
                         .context("Declared streaming node range count")?;
-                    ensure!(declared == ranges.len() as u64,
-                        "{depot}: {sector_path} declares {declared} node ranges but contains {}", ranges.len());
+                    ensure!(
+                        declared == ranges.len() as u64,
+                        "{depot}: {sector_path} declares {declared} node ranges but contains {}",
+                        ranges.len()
+                    );
                     for variant in descriptor["variants"].as_array().into_iter().flatten() {
-                        let range = variant["rangeIndex"].as_u64().context("Variant range index")?;
-                        ensure!(range < declared,
-                            "{depot}: {sector_path} variant range {range} exceeds {declared} node ranges");
+                        let range = variant["rangeIndex"]
+                            .as_u64()
+                            .context("Variant range index")?;
+                        ensure!(
+                            range < declared,
+                            "{depot}: {sector_path} variant range {range} exceeds {declared} node ranges"
+                        );
                     }
                 }
             }

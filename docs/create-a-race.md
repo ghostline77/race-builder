@@ -6,13 +6,12 @@ CET is required only for manual in-game route capture.
 
 ## Prepare the editor
 
-Install the parent JavaScript workspace dependencies and keep the native sibling
-crates available. Run from the race-builder repository:
+Install Rust and Node.js, then run from this repository:
 
 ```powershell
 cargo build --release --locked
 cargo run --release --locked -- roads --game 'path/to/Cyberpunk 2077' --out roads.json
-cargo run --release --locked -- serve --roads roads.json --vehicles ../vehicles/dist/catalogue
+cargo run --release --locked -- serve --roads roads.json --vehicles path/to/vehicle-catalogue
 ```
 
 Open <http://127.0.0.1:8795/>. The vehicle picker uses a published Vehicles

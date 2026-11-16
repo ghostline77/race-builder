@@ -9,8 +9,8 @@ anyhow = "1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 crc32fast = "1"
-ghostline-quest-builder = { path = "../quest-builder" }
-ghostline-red = { path = "../ghostline-red" }
+ghostline-quest-builder = { git = "https://github.com/ghostline77/quest-builder" }
+ghostline-red = { git = "https://github.com/ghostline77/ghostline-red" }
 glam = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "unbounded_depth"] }

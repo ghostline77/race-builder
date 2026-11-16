@@ -1,1 +1,1 @@
-{ "extends": "../../ui-core/tsconfig.json", "include": ["src"] }
+{ "extends": "@ghostline/ui-core/tsconfig.json", "include": ["src"] }

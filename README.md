@@ -1,14 +1,12 @@
 # Race Builder
 
 Rust race compiler, road-route editor and CET capture mod for Cyberpunk 2077.
-Requires sibling `quest-builder` and `ghostline-red` crates. Install the parent
-`ghostline77` JavaScript workspace with `npm ci` before a fresh build.
-Run commands below from this repository.
+Use Rust 1.92+ and Node.js 20+. Cargo and npm fetch the locked dependencies. Run from this repository.
 
 See [create and test a race](docs/create-a-race.md) for the complete authoring flow.
 
 ```sh
-cargo run --release -- serve --roads roads.json --vehicles ../vehicles/dist/catalogue
+cargo run --release -- serve --roads roads.json --vehicles path/to/vehicle-catalogue
 ```
 
 Open <http://127.0.0.1:8795/>. Use **Draw route** to click before and after turns;

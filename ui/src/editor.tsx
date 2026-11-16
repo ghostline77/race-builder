@@ -1,18 +1,10 @@
 import { RouteMap } from "./route-map";
 import { SeriesEditor } from "./series-editor";
 import { coursePosition } from "./course-position";
-import {
-  $,
-  el,
-  errorMessage,
-  safely,
-  on,
-  notice,
-  createInput,
-  button,
-  dialog,
-  modalField,
-} from "./dom";
+import { Children, createElement, type ReactNode } from "react";
+import { Field, type Choices } from "./Field";
+import { ask } from "./Modal";
+import { view, action, changed, errorMessage, notice, safely } from "./state";
 import type {
   ApiReplies,
   Bootstrap,
@@ -27,7 +19,7 @@ import type { Point, Road } from "./road-levels";
 const words = (s: string) =>
   s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const id = () => `m_${crypto.randomUUID().replaceAll("-", "")}`;
-const copy = <T>(v: T): T => structuredClone(v);
+const copy = <T,>(v: T): T => structuredClone(v);
 let bootstrap: Bootstrap,
   network: RoadNetwork,
   project: Project,
@@ -45,56 +37,60 @@ let pendingSpeedMps: number | null = null;
 let guidancePoints: Point[] = [];
 let guidanceKey = "";
 let checkpointRanks = new Map<string, number>();
-const canvas = $("#map");
-const input = createInput(checkpoint, () => update(false));
-const routeMap = new RouteMap(canvas, {
-  ready: () => Boolean(project),
-  camera: () => camera,
-  setCamera: (value) => {
-    camera = value;
-  },
-  marks: () => project?.route.marks || [],
-  course: () => (project ? points() : []),
-  guidance: () => guidancePoints,
-  anchors: () => (project ? controls() : []),
-  selected: () => selected,
-  mode: () => mapMode,
-  looped: () => project.route.looped,
-  projectId: () => project.route.id,
-  label: pointLabel,
-  select: (mark, details) => {
-    selected = mark.id;
-    if (details) $("#selected-details").open = true;
-    renderMarks();
-    draw();
-  },
-  move: (mark, position, height, snap) =>
-    queueEdit(async () => {
-      if (mark.role === "speed_change") {
-        checkpoint();
-        mark.position = coursePosition(
-          position,
-          points().map((m) => m.position),
-          project.route.looped,
-          height ?? mark.position.z,
-        ).position;
-        update();
-        return;
-      }
-      const p = snap
-        ? (await api("snap", { position, height: height ?? position.z }))
-            .position
-        : position;
-      if (mark.role === "spline_point") await reroute(mark, p);
-      else {
-        checkpoint();
-        mark.position = p;
-        update();
-      }
-    }),
-  place: (position, role, height, snap) =>
-    queueEdit(() => place(position, { role, height, snap })),
-});
+let routeMap: RouteMap;
+let canvas: HTMLCanvasElement;
+export function initialize(node: HTMLCanvasElement) {
+  canvas = node;
+  routeMap = new RouteMap(node, {
+    ready: () => Boolean(project),
+    camera: () => camera,
+    setCamera: (value) => {
+      camera = value;
+    },
+    marks: () => project?.route.marks || [],
+    course: () => (project ? points() : []),
+    guidance: () => guidancePoints,
+    anchors: () => (project ? controls() : []),
+    selected: () => selected,
+    mode: () => mapMode,
+    looped: () => project.route.looped,
+    projectId: () => project.route.id,
+    label: pointLabel,
+    select: (mark, details) => {
+      selected = mark.id;
+      if (details) view.details = true;
+      changed();
+      draw();
+    },
+    move: (mark, position, height, snap) =>
+      queueEdit(async () => {
+        if (mark.role === "speed_change") {
+          checkpoint();
+          mark.position = coursePosition(
+            position,
+            points().map((m) => m.position),
+            project.route.looped,
+            height ?? mark.position.z,
+          ).position;
+          update();
+          return;
+        }
+        const p = snap
+          ? (await api("snap", { position, height: height ?? position.z }))
+              .position
+          : position;
+        if (mark.role === "spline_point") await reroute(mark, p);
+        else {
+          checkpoint();
+          mark.position = p;
+          update();
+        }
+      }),
+    place: (position, role, height, snap) =>
+      queueEdit(() => place(position, { role, height, snap })),
+  });
+  void boot().catch((e) => notice(errorMessage(e), true));
+}
 function api<K extends keyof ApiReplies>(
   path: K,
   value?: unknown,
@@ -141,7 +137,7 @@ function last<T>(values: readonly T[]): T {
   if (value === undefined) throw Error("Expected at least one route point");
   return value;
 }
-const seriesEditor = new SeriesEditor({
+export const seriesEditor = new SeriesEditor({
   request: api,
   projects: () => bootstrap.projects,
   openProject: async (id) => {
@@ -153,10 +149,10 @@ const seriesEditor = new SeriesEditor({
     redo = [];
     renderAll();
     fit();
-    document.querySelector<HTMLButtonElement>('[data-tab="route"]')!.click();
+    selectTab("route");
   },
 });
-const showingSeries = () => !$("#series-view").hidden;
+const showingSeries = () => view.tab === "series";
 function checkpoint() {
   undo.push(copy(project));
   if (undo.length > 100) undo.shift();
@@ -173,18 +169,19 @@ async function flushSave() {
         const r = await api("save", snapshot);
         bootstrap.projects = r.projects;
         if (project.route.id === snapshot.route.id) {
-          $("#save-status").textContent = "Saved";
-          renderProjects();
+          view.status = "Saved";
+          changed();
         }
       } catch (error) {
-        $("#save-status").textContent = "Save failed";
+        view.status = "Save failed";
+        changed();
         throw error;
       }
     });
   return saveQueue;
 }
 function update(render = true) {
-  $("#save-status").textContent = "Saving…";
+  view.status = "Saving…";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(safely(flushSave), 600);
   if (render) renderAll();
@@ -200,34 +197,27 @@ function controls() {
 }
 function setMode(mode: string) {
   mapMode = mode;
-  $("#add-speed").setAttribute(
-    "aria-pressed",
-    String(mode === "place" && $("#role").value === "speed_change"),
-  );
-  if (mode === "draw") $("#role").value = "spline_point";
-  for (const key of ["draw", "edit", "pan"])
-    $("#mode-" + key).setAttribute("aria-pressed", String(mode === key));
+  view.mode = mode;
+  if (mode === "draw") view.role = "spline_point";
   canvas.style.cursor =
     mode === "draw" || mode === "place"
       ? "crosshair"
       : mode === "pan"
         ? "grab"
         : "default";
-  $("#map-hint").textContent =
+  view.hint =
     mode === "draw"
       ? "Click before and after turns to add route points. Drag empty space to pan."
       : mode === "edit"
         ? "Drag a route point to reshape the roads around it. Click a point for details."
         : mode === "pan"
           ? "Drag to explore the map. Scroll to zoom."
-          : "Click the map to place " +
-            words($("#role").value).toLowerCase() +
-            ".";
+          : "Click the map to place " + words(view.role).toLowerCase() + ".";
   draw();
 }
 function queueEdit(action: () => void | Promise<void>) {
   pendingEdits++;
-  $("#draw-state").textContent =
+  view.progress =
     "Following roads…" +
     (pendingEdits > 1 ? " " + pendingEdits + " points queued" : "");
   routeQueue = routeQueue
@@ -235,7 +225,8 @@ function queueEdit(action: () => void | Promise<void>) {
     .catch((error) => notice(errorMessage(error), true))
     .finally(() => {
       pendingEdits--;
-      $("#draw-state").textContent = pendingEdits
+      changed();
+      view.progress = pendingEdits
         ? "Following roads… " + pendingEdits + " points queued"
         : "";
     });
@@ -273,8 +264,11 @@ async function reshape(
 ) {
   const original = points(),
     rebuilt: RouteMark[] = [],
-    snap = $("#snap").checked,
-    height = $("#height").value === "" ? null : Number($("#height").value);
+    snap = view.snap,
+    height =
+      (document.getElementById("height") as HTMLInputElement).value === ""
+        ? null
+        : Number((document.getElementById("height") as HTMLInputElement).value);
   for (let i = 0; i < anchors.length; i++) {
     const anchor = copy(anchors[i]!);
     if (i) {
@@ -386,28 +380,66 @@ function newProject(): Project {
     },
   };
 }
-function renderProjects() {
-  const picker = $("#projects");
-  picker.replaceChildren(new Option("Choose a saved race", ""));
-  for (const p of bootstrap.projects) picker.append(new Option(p.title, p.id));
-  picker.value = bootstrap.projects.some((p) => p.id === project.route.id)
-    ? project.route.id
-    : "";
-}
 function renderAll() {
-  renderProjects();
-  $("#title").textContent = project.config.title;
-  $("#description").textContent =
-    project.config.description ||
-    "Draw a course along the roads, then place the start and finish.";
-  $("#looped").checked = project.route.looped;
-  renderMarks();
-  renderEntrants();
-  renderRules();
+  changed();
   draw();
 }
+export function selectTab(tab: string) {
+  view.tab = tab;
+  changed();
+  requestAnimationFrame(draw);
+}
+export function editor() {
+  return {
+    project,
+    bootstrap,
+    undo,
+    redo,
+    vehicles,
+    anchorCount: project ? controls().length : 0,
+  };
+}
+let vehicles: ApiReplies["vehicles"] = [];
+function field<T extends string | number | undefined>(
+  parent: ReactNode[],
+  label: string,
+  value: T,
+  change: (v: NonNullable<T>) => void,
+  options: Choices = {},
+) {
+  parent.push(
+    <Field
+      key={label}
+      label={label}
+      value={value}
+      {...options}
+      change={(v) => {
+        checkpoint();
+        change(v);
+        update(false);
+        changed();
+      }}
+    />,
+  );
+}
+function button(
+  parent: ReactNode[],
+  label: string,
+  click: () => unknown,
+  cls = "quiet",
+) {
+  parent.push(
+    <button className={cls} onClick={safely(click)}>
+      {label}
+    </button>,
+  );
+}
+function caption(tag: "p" | "h2", text: string, className?: string) {
+  return createElement(tag, { className }, text);
+}
 function pointLabel(mark: RouteMark) {
-  if (mark.role === "checkpoint") return `Checkpoint ${checkpointRanks.get(mark.id) ?? mark.order + 1}`;
+  if (mark.role === "checkpoint")
+    return `Checkpoint ${checkpointRanks.get(mark.id) ?? mark.order + 1}`;
   if (mark.role !== "spline_point")
     return words(mark.role) + " " + (mark.order + 1);
   const anchors = controls(),
@@ -420,9 +452,8 @@ function pointLabel(mark: RouteMark) {
         ? "Via point " + index
         : "Road sample " + (mark.order + 1);
 }
-function renderSpeedMarks() {
-  const speedList = $("#speed-marks");
-  speedList.replaceChildren();
+export function SpeedMarks() {
+  const speedList: ReactNode[] = [];
   const course = points().map((m) => m.position);
   for (const m of project.route.marks
     .filter((m) => m.role === "speed_change")
@@ -445,8 +476,8 @@ function renderSpeedMarks() {
       () => {
         selected = m.mark.id;
         setMode("edit");
-        $("#selected-details").open = true;
-        renderMarks();
+        view.details = true;
+        changed();
         camera.x = m.mark.position.x;
         camera.y = m.mark.position.y;
         draw();
@@ -454,66 +485,80 @@ function renderSpeedMarks() {
       "mark" + (selected === m.mark.id ? " active" : ""),
     );
   }
+  return <>{Children.toArray(speedList)}</>;
 }
-function renderMarks() {
+export function MarkPanel({
+  part,
+}: {
+  part: "summary" | "speed" | "list" | "selected" | "speed-selected";
+}) {
   let length = 0;
   const all = points();
-  const checkpointMarks = project.route.marks.filter(m => m.role === "checkpoint");
+  const checkpointMarks = project.route.marks.filter(
+    (m) => m.role === "checkpoint",
+  );
   if (all.length > 1) {
-    const course = all.map(m => m.position);
-    const stations = new Map(checkpointMarks.map(m => [m.id, coursePosition(m.position, course,
-      project.route.looped, m.position.z, typeof m.options.station_m === "number" ? m.options.station_m : null).station]));
-    checkpointMarks.sort((a,b) => stations.get(a.id)! - stations.get(b.id)!);
+    const course = all.map((m) => m.position);
+    const stations = new Map(
+      checkpointMarks.map((m) => [
+        m.id,
+        coursePosition(
+          m.position,
+          course,
+          project.route.looped,
+          m.position.z,
+          typeof m.options.station_m === "number" ? m.options.station_m : null,
+        ).station,
+      ]),
+    );
+    checkpointMarks.sort((a, b) => stations.get(a.id)! - stations.get(b.id)!);
   }
-  checkpointRanks = new Map(checkpointMarks.map((m,i) => [m.id, i + 1]));
+  checkpointRanks = new Map(checkpointMarks.map((m, i) => [m.id, i + 1]));
   for (let i = 1; i < all.length; i++)
     length += distance(all[i - 1]!.position, all[i]!.position);
   if (project.route.looped && all.length > 2)
     length += distance(last(all).position, all[0]!.position);
-  $("#route-summary").textContent =
-    `${(length / 1000).toFixed(2)} km · ${controls().length} route point${controls().length === 1 ? "" : "s"}`;
-  $("#finish-drawing").disabled = controls().length < 2;
-  $("#looped").disabled = controls().length < 3;
-  $("#undo").disabled = !undo.length;
-  $("#redo").disabled = !redo.length;
-  $("#add-speed").setAttribute(
-    "aria-pressed",
-    String(mapMode === "place" && $("#role").value === "speed_change"),
-  );
-  const speedDefault = $("#default-speed");
-  speedDefault.replaceChildren();
-  input(
-    speedDefault,
-    "Starting target (km/h)",
-    Math.round(project.route.speed_mps * 360) / 100,
-    (v) => {
-      if (v < 0) {
-        notice("Speed cannot be negative.", true);
-        return;
-      }
-      project.route.speed_mps = v / 3.6;
-      renderSpeedMarks();
-      renderRules();
-    },
-    { type: "number" },
-  );
-  renderSpeedMarks();
-  const list = $("#marks");
-  list.replaceChildren();
-  const query = $("#mark-filter").value.toLowerCase();
+  if (part === "summary")
+    return (
+      <>
+        {(length / 1000).toFixed(2)} km · {controls().length} route points
+      </>
+    );
+  const speedDefault: ReactNode[] = [];
+  if (part === "speed") {
+    field(
+      speedDefault,
+      "Starting target (km/h)",
+      Math.round(project.route.speed_mps * 360) / 100,
+      (v) => {
+        if (v < 0) {
+          notice("Speed cannot be negative.", true);
+          return;
+        }
+        project.route.speed_mps = v / 3.6;
+        changed();
+      },
+      { type: "number" },
+    );
+    return <>{Children.toArray(speedDefault)}</>;
+  }
+  const list: ReactNode[] = [];
+  const query = view.filter.toLowerCase();
   const marks = [...project.route.marks]
     .filter(
       (m) =>
         m.role !== "speed_change" &&
-        ($("#show-samples").checked || !m.options?.generated_road_sample),
+        (view.samples || !m.options?.generated_road_sample),
     )
     .sort((a, b) =>
       a.role === "spline_point" && b.role !== "spline_point"
         ? -1
         : b.role === "spline_point" && a.role !== "spline_point"
           ? 1
-          : a.role.localeCompare(b.role) || (a.role === "checkpoint"
-            ? checkpointRanks.get(a.id)! - checkpointRanks.get(b.id)! : a.order - b.order),
+          : a.role.localeCompare(b.role) ||
+            (a.role === "checkpoint"
+              ? checkpointRanks.get(a.id)! - checkpointRanks.get(b.id)!
+              : a.order - b.order),
     )
     .filter((m) => `${m.name} ${pointLabel(m)}`.toLowerCase().includes(query));
   for (const m of marks) {
@@ -523,21 +568,20 @@ function renderMarks() {
       () => {
         selected = m.id;
         setMode("edit");
-        $("#selected-details").open = true;
-        renderMarks();
+        view.details = true;
+        changed();
         draw();
       },
       "mark" + (selected === m.id ? " active" : ""),
     );
   }
-  $("#selected").replaceChildren();
-  $("#speed-selected").replaceChildren();
+  if (part === "list") return <>{Children.toArray(list)}</>;
   const mark = project.route.marks.find((m) => m.id === selected);
-  if (!mark) return;
-  const detail =
-    mark.role === "speed_change" ? $("#speed-selected") : $("#selected");
+  if (!mark || (mark.role === "speed_change") !== (part === "speed-selected"))
+    return null;
+  const detail: ReactNode[] = [];
   if (mark.role === "speed_change") {
-    input(
+    field(
       detail,
       "Target speed (km/h)",
       Math.round((mark.options.speed_mps ?? project.route.speed_mps) * 360) /
@@ -548,7 +592,7 @@ function renderMarks() {
           return;
         }
         mark.options.speed_mps = v / 3.6;
-        renderSpeedMarks();
+        changed();
       },
       { type: "number" },
     );
@@ -572,38 +616,67 @@ function renderMarks() {
       },
       "quiet danger",
     );
-    detail.append(
-      el(
+    detail.push(
+      caption(
         "p",
         "Drag the marker in Move points mode to change where this speed begins.",
         "hint",
       ),
     );
-    return;
+    return <>{Children.toArray(detail)}</>;
   }
-  detail.append(el("h2", words(mark.role)));
-  input(detail, "Name", mark.name, (v) => {
+  detail.push(caption("h2", words(mark.role)));
+  field(detail, "Name", mark.name, (v) => {
     mark.name = v;
   });
-  const coords = el("div", undefined, "fields");
+  const coords: ReactNode[] = [];
   for (const k of ["x", "y", "z"] as const)
-    input(
+    field(
       coords,
       k.toUpperCase(),
       mark.position[k],
       (v) => (mark.position[k] = v),
       { type: "number" },
     );
-  if (mark.role === "checkpoint") input(coords, "Checkpoint arrow", String(mark.options.direction ?? "automatic"),
-    (v) => { if (v === "automatic") delete mark.options.direction; else mark.options.direction = v; },
-    {choices: [["From route", "automatic"], ["Straight ahead", "Forward"], ["Turn left", "Left"], ["Turn right", "Right"]]});
-  if (mark.role === "checkpoint") input(coords, "Heading alignment", mark.options.align_to_route === false ? "custom" : "course",
-    (v) => { mark.options.align_to_route = v !== "custom"; renderMarks(); },
-    {choices: [["Across the course", "course"], ["Custom heading", "custom"]]});
-  if (mark.role !== "checkpoint" || mark.options.align_to_route === false) input(coords, "Heading (°)", mark.yaw, (v) => (mark.yaw = v), {
-    type: "number",
-  });
-  detail.append(coords);
+  if (mark.role === "checkpoint")
+    field(
+      coords,
+      "Checkpoint arrow",
+      String(mark.options.direction ?? "automatic"),
+      (v) => {
+        if (v === "automatic") delete mark.options.direction;
+        else mark.options.direction = v;
+      },
+      {
+        choices: [
+          ["From route", "automatic"],
+          ["Straight ahead", "Forward"],
+          ["Turn left", "Left"],
+          ["Turn right", "Right"],
+        ],
+      },
+    );
+  if (mark.role === "checkpoint")
+    field(
+      coords,
+      "Heading alignment",
+      mark.options.align_to_route === false ? "custom" : "course",
+      (v) => {
+        mark.options.align_to_route = v !== "custom";
+        changed();
+      },
+      {
+        choices: [
+          ["Across the course", "course"],
+          ["Custom heading", "custom"],
+        ],
+      },
+    );
+  if (mark.role !== "checkpoint" || mark.options.align_to_route === false)
+    field(coords, "Heading (°)", mark.yaw, (v) => (mark.yaw = v), {
+      type: "number",
+    });
+  detail.push(<div className="fields">{Children.toArray(coords)}</div>);
   if (
     ["checkpoint", "staging", "finish", "hazard", "boundary"].includes(
       mark.role,
@@ -614,17 +687,23 @@ function renderMarks() {
       ["depth_m", "Depth (m)", 2],
       ["height_m", "Height (m)", 4],
     ] as const)
-      input(
+      field(
         detail,
         label,
-        mark.options[k] ?? (mark.role === "checkpoint" ?
-          (k === "width_m" ? project.config.checkpoint_width_m ?? 12 : k === "depth_m" ? 4 : 6) : defaultValue),
+        mark.options[k] ??
+          (mark.role === "checkpoint"
+            ? k === "width_m"
+              ? (project.config.checkpoint_width_m ?? 12)
+              : k === "depth_m"
+                ? 4
+                : 6
+            : defaultValue),
         (v) => (mark.options[k] = v),
         { type: "number" },
       );
   if (mark.role === "width_change")
     for (const k of ["left_m", "right_m"] as const)
-      input(
+      field(
         detail,
         words(k),
         mark.options[k] ?? 5,
@@ -632,16 +711,17 @@ function renderMarks() {
         { type: "number" },
       );
   if (mark.role === "prop")
-    input(
+    field(
       detail,
       "Entity template",
       mark.options.entity_template || "",
       (v) => (mark.options.entity_template = v),
     );
-  input(detail, "Notes", mark.notes || "", (v) => (mark.notes = v), {
+  field(detail, "Notes", mark.notes || "", (v) => (mark.notes = v), {
     type: "textarea",
   });
-  if (mark.role === "checkpoint") detail.append(el("p", "Checkpoint order follows the course.", "hint"));
+  if (mark.role === "checkpoint")
+    detail.push(caption("p", "Checkpoint order follows the course.", "hint"));
   else {
     button(detail, "Move earlier", () => moveMark(mark, -1));
     button(detail, "Move later", () => moveMark(mark, 1));
@@ -676,6 +756,7 @@ function renderMarks() {
       }),
     "quiet danger",
   );
+  return <>{Children.toArray(detail)}</>;
 }
 function moveMark(mark: RouteMark, direction: number) {
   if (mark.role === "spline_point" && !mark.options?.generated_road_sample) {
@@ -699,18 +780,17 @@ function moveMark(mark: RouteMark, direction: number) {
   [mark.order, other.order] = [other.order, mark.order];
   update();
 }
-function renderEntrants() {
-  const parent = $("#entrants");
-  parent.replaceChildren();
+export function Entrants({ playerOnly = false }: { playerOnly?: boolean }) {
+  const parent: ReactNode[] = [];
   for (const [i, entry] of project.config.entrants.entries()) {
-    const card = el("section", undefined, "entrant");
-    card.append(el("h2", entry.name || `Opponent ${i + 1}`));
-    const fields = el("div", undefined, "fields");
-    input(fields, "Name", entry.name || "", (v) => (entry.name = v));
+    const card: ReactNode[] = [];
+    card.push(caption("h2", entry.name || `Opponent ${i + 1}`));
+    const fields: ReactNode[] = [];
+    field(fields, "Name", entry.name || "", (v) => (entry.name = v));
     const grids = project.route.marks
       .filter((m) => m.role === "start_grid")
       .sort((a, b) => a.order - b.order);
-    input(
+    field(
       fields,
       "Grid position",
       entry.grid,
@@ -724,35 +804,35 @@ function renderEntrants() {
           : [["Place a start grid mark", ""]],
       },
     );
-    input(fields, "Vehicle record", entry.vehicle, (v) => (entry.vehicle = v), {
+    field(fields, "Vehicle record", entry.vehicle, (v) => (entry.vehicle = v), {
       list: "vehicle-records",
     });
-    input(
+    field(
       fields,
       "Vehicle appearance",
       entry.vehicle_appearance || "default",
       (v) => (entry.vehicle_appearance = v),
     );
-    input(fields, "Driver record", entry.driver, (v) => (entry.driver = v));
-    input(
+    field(fields, "Driver record", entry.driver, (v) => (entry.driver = v));
+    field(
       fields,
       "Driver appearance",
       entry.driver_appearance || "default",
       (v) => (entry.driver_appearance = v),
     );
-    input(
+    field(
       fields,
       "Passenger record",
       entry.passenger || entry.driver,
       (v) => (entry.passenger = v),
     );
-    input(
+    field(
       fields,
       "Passenger appearance",
       entry.passenger_appearance || "default",
       (v) => (entry.passenger_appearance = v),
     );
-    card.append(fields);
+    card.push(<div className="fields">{Children.toArray(fields)}</div>);
     button(
       card,
       "Remove opponent",
@@ -763,83 +843,109 @@ function renderEntrants() {
       },
       "quiet danger",
     );
-    parent.append(card);
+    parent.push(
+      <section key={entry.id} className="entrant">
+        {Children.toArray(card)}
+      </section>,
+    );
   }
   if (!project.config.entrants.length)
-    parent.append(
-      el(
+    parent.push(
+      caption(
         "p",
         "Add at least one opponent. Each opponent needs a distinct starting-grid mark.",
         "hint",
       ),
     );
-  $("#force-player").checked = Boolean(project.config.player_vehicle);
-  const player = $("#player-vehicle");
-  player.replaceChildren();
+  if (!playerOnly) return <>{Children.toArray(parent)}</>;
+  const player: ReactNode[] = [];
   const playerVehicle = project.config.player_vehicle;
   if (playerVehicle) {
-    input(
+    field(
       player,
       "Player vehicle record",
       playerVehicle.record,
       (v) => (playerVehicle.record = v),
       { list: "vehicle-records" },
     );
-    input(
+    field(
       player,
       "Player vehicle appearance",
       playerVehicle.appearance || "default",
       (v) => (playerVehicle.appearance = v),
     );
   }
+  return <>{Children.toArray(player)}</>;
 }
-function renderRules() {
-  const parent = $("#rules");
-  parent.replaceChildren();
-  parent.append(el("h2", "Course & race settings"));
-  input(
+export function Rules() {
+  const parent: ReactNode[] = [];
+  parent.push(caption("h2", "Course & race settings"));
+  field(
     parent,
     "Race namespace",
     project.config.id,
     (v) => (project.config.id = v),
   );
-  input(
+  field(
     parent,
     "Route half-width (m)",
     project.route.width_default,
     (v) => (project.route.width_default = v),
     { type: "number" },
   );
-  input(
+  field(
     parent,
     "Starting target (m/s)",
     project.route.speed_mps,
     (v) => {
       project.route.speed_mps = v;
-      renderMarks();
+      changed();
     },
     { type: "number" },
   );
-  input(
+  field(
     parent,
     "Checkpoint placement",
     project.config.checkpoint_placement ?? "automatic",
-    (v) => { project.config.checkpoint_placement = v as "automatic" | "manual"; renderRules(); },
-    { choices: [["Placed checkpoints only", "manual"], ["Spaced checkpoints + placed points", "automatic"]] },
+    (v) => {
+      project.config.checkpoint_placement = v as "automatic" | "manual";
+      changed();
+    },
+    {
+      choices: [
+        ["Placed checkpoints only", "manual"],
+        ["Spaced checkpoints + placed points", "automatic"],
+      ],
+    },
   );
-  if (project.config.checkpoint_placement !== "manual") input(
+  if (project.config.checkpoint_placement !== "manual")
+    field(
+      parent,
+      "Checkpoint spacing (m)",
+      project.config.checkpoint_spacing_m ?? 40,
+      (v) => (project.config.checkpoint_spacing_m = v),
+      { type: "number" },
+    );
+  field(
     parent,
-    "Checkpoint spacing (m)",
-    project.config.checkpoint_spacing_m ?? 40,
-    (v) => (project.config.checkpoint_spacing_m = v),
+    "Default checkpoint width (m)",
+    project.config.checkpoint_width_m ?? 12,
+    (v) => (project.config.checkpoint_width_m = v),
     { type: "number" },
   );
-  input(parent, "Default checkpoint width (m)", project.config.checkpoint_width_m ?? 12,
-    (v) => (project.config.checkpoint_width_m = v), {type: "number"});
-  input(parent, "Guidance line", project.config.guidance_alignment ?? "route",
+  field(
+    parent,
+    "Guidance line",
+    project.config.guidance_alignment ?? "route",
     (v) => (project.config.guidance_alignment = v as "route" | "road_center"),
-    {choices: [["Road centre", "road_center"], ["Route lane", "route"]]});
-  input(
+    {
+      choices: [
+        ["Road centre", "road_center"],
+        ["Route lane", "route"],
+      ],
+    },
+  );
+  field(
     parent,
     "Checkpoint style",
     project.config.checkpoint_mode || "vanilla",
@@ -851,39 +957,52 @@ function renderRules() {
       ],
     },
   );
-  parent.append(
-    el(
+  parent.push(
+    caption(
       "p",
       "Native race rules: first place wins; 10,000-eddy payout; off-course recovery at 50 m with a 2-second grace and 40 m return threshold. A closed spline is one course, not a multi-lap race.",
       "hint",
     ),
   );
-  parent.append(el("h2", "Advanced course authoring"));
-  parent.append(
-    el(
+  parent.push(caption("h2", "Advanced course authoring"));
+  parent.push(
+    caption(
       "p",
       "Water areas, dressing, finish parking, courier paths, stopping areas and individual staging transforms remain available in the complete JSON editor.",
       "hint",
     ),
   );
+  return <>{Children.toArray(parent)}</>;
 }
 function distance(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 function draw() {
   if (project) {
-    const key = JSON.stringify([project.config.guidance_alignment, points().map(m => m.position)]);
+    const key = JSON.stringify([
+      project.config.guidance_alignment,
+      points().map((m) => m.position),
+    ]);
     if (key !== guidanceKey) {
       guidanceKey = key;
       guidancePoints = [];
-      if (project.config.guidance_alignment === "road_center" && points().length > 1) {
-        void api("guidance", {route: project.route}).then(result => {
-          if (key === guidanceKey) { guidancePoints = result.points; routeMap.draw(); }
-        }).catch(error => notice(errorMessage(error), true));
+      if (
+        project.config.guidance_alignment === "road_center" &&
+        points().length > 1
+      ) {
+        void api("guidance", { route: project.route })
+          .then((result) => {
+            if (key === guidanceKey) {
+              guidancePoints = result.points;
+              routeMap.draw();
+            }
+          })
+          .catch((error) => notice(errorMessage(error), true));
       }
     }
   }
-  routeMap.draw();
+  routeMap?.draw();
+  changed();
 }
 function fit(city = false) {
   routeMap.fit(city);
@@ -896,11 +1015,15 @@ async function place(
   position: Point,
   options: { role?: string; height?: number | null; snap?: boolean } = {},
 ) {
-  const role = options.role || $("#role").value,
+  const role = options.role || view.role,
     height =
       options.height ??
-      ($("#height").value === "" ? null : Number($("#height").value)),
-    snap = options.snap ?? $("#snap").checked;
+      ((document.getElementById("height") as HTMLInputElement).value === ""
+        ? null
+        : Number(
+            (document.getElementById("height") as HTMLInputElement).value,
+          )),
+    snap = options.snap ?? view.snap;
   if (role === "speed_change") {
     const projected = coursePosition(
       position,
@@ -913,8 +1036,8 @@ async function place(
     mark.options.speed_mps = pendingSpeedMps ?? project.route.speed_mps;
     pendingSpeedMps = null;
     setMode("edit");
-    $("#selected-details").open = true;
-    $("#notice").hidden = true;
+    view.details = true;
+    view.message = "";
     update();
     return;
   }
@@ -964,10 +1087,10 @@ async function place(
     if (role === "spline_point") m.options.route_anchor = true;
   }
   updateHeadings();
-  $("#notice").hidden = true;
+  view.message = "";
   update();
 }
-on("#undo", "click", async () => {
+action("undo", async () => {
   await routeQueue;
   if (!undo.length) return;
   redo.push(copy(project));
@@ -975,7 +1098,7 @@ on("#undo", "click", async () => {
   selected = null;
   update();
 });
-on("#redo", "click", async () => {
+action("redo", async () => {
   await routeQueue;
   if (!redo.length) return;
   undo.push(copy(project));
@@ -983,87 +1106,70 @@ on("#redo", "click", async () => {
   selected = null;
   update();
 });
-on("#fit", "click", () => fit());
-on("#fit-network", "click", () => fit(true));
-on("#height", "input", draw);
-on("#mark-filter", "input", renderMarks);
-on("#show-samples", "change", () => {
-  renderMarks();
+action("fit", () => fit());
+action("fit-network", () => fit(true));
+action("height", draw);
+
+action("show-samples", () => {
+  changed();
   draw();
 });
-on("#looped", "change", () => {
-  const closed = $("#looped").checked;
+action("looped", () => {
+  const closed = !project.route.looped;
   queueEdit(async () => {
     try {
       await reshape(controls(), closed);
       if (closed) setMode("edit");
     } catch (error) {
-      $("#looped").checked = project.route.looped;
+      changed();
       throw error;
     }
   });
 });
 for (const mode of ["draw", "edit", "pan"])
-  on("#mode-" + mode, "click", () => setMode(mode));
-on("#add-speed", "click", async () => {
+  action("mode-" + mode, () => setMode(mode));
+action("add-speed", async () => {
   if (points().length < 2)
     throw Error("Draw a course before adding speed changes.");
-  const target = await dialog("Add speed change", (parent) => {
-    parent.append(
-      el(
-        "p",
-        "Choose the opponents’ target speed, then click where it should begin on the existing course.",
-      ),
-    );
-    const speed = modalField(
-      parent,
-      "Target speed (km/h)",
-      String(Math.round(project.route.speed_mps * 3.6)),
-      "number",
-    );
-    speed.setAttribute("min", "0");
-    speed.setAttribute("step", "any");
-    return () => {
-      const value = Number(speed.value);
-      if (!speed.value || !Number.isFinite(value) || value < 0)
-        throw Error("Enter a non-negative target speed.");
-      return value / 3.6;
-    };
-  });
-  if (target === null) return;
+  const result = await ask("Add speed change", [
+    {
+      name: "Target speed (km/h)",
+      value: String(Math.round(project.route.speed_mps * 3.6)),
+      type: "number",
+      min: 0,
+      required: true,
+    },
+  ]);
+  if (!result) return;
+  const target = Number(result["Target speed (km/h)"]) / 3.6;
   pendingSpeedMps = target;
-  $("#role").value = "speed_change";
+  view.role = "speed_change";
   setMode("place");
-  $("#map-hint").textContent =
-    `Click the course to begin ${Math.round(target * 3.6)} km/h. Drag empty space to pan.`;
+  view.hint = `Click the course to begin ${Math.round(target * 3.6)} km/h. Drag empty space to pan.`;
 });
-on("#role", "change", () =>
-  setMode($("#role").value === "spline_point" ? "draw" : "place"),
-);
-on("#rebuild-roads", "click", () =>
+action("role", () => setMode(view.role === "spline_point" ? "draw" : "place"));
+action("rebuild-roads", () =>
   queueEdit(() => reshape(controls(), project.route.looped, selected, true)),
 );
-on("#finish-drawing", "click", async () => {
+action("finish-drawing", async () => {
   await routeQueue;
   setMode("edit");
   notice("Course ready. Set up the starting grid, then choose your vehicles.");
 });
-on("#next-vehicles", "click", () =>
-  document.querySelector<HTMLButtonElement>('[data-tab="grid"]')!.click(),
-);
-on("#new", "click", async () => {
+action("next-vehicles", () => selectTab("grid"));
+action("new", async () => {
   await routeQueue;
   await flushSave();
   project = newProject();
   undo = [];
   redo = [];
   selected = null;
-  $("#selected-details").open = false;
+  view.details = false;
   setMode("draw");
   update();
 });
-on("#projects", "change", async () => {
-  const key = $("#projects").value;
+action("projects", async () => {
+  const key = (document.getElementById("projects") as HTMLSelectElement).value;
   if (!key) return;
   await routeQueue;
   await flushSave();
@@ -1075,25 +1181,27 @@ on("#projects", "change", async () => {
   renderAll();
   fit();
 });
-on("#edit-title", "click", async () => {
-  const result = await dialog("Race title and description", (p) => {
-    const title = modalField(p, "Title", project.config.title),
-      desc = modalField(
-        p,
-        "Description",
-        project.config.description,
-        "textarea",
-      );
-    return () => ({ title: title.value.trim(), description: desc.value });
-  });
-  if (!result) return;
+action("edit-title", async () => {
+  const values = await ask("Race title and description", [
+    { name: "Title", value: project.config.title, required: true },
+    {
+      name: "Description",
+      type: "textarea",
+      value: project.config.description,
+    },
+  ]);
+  if (!values) return;
+  const result = {
+    title: values.Title!.trim(),
+    description: values.Description!,
+  };
   if (!result.title) throw Error("Enter a title");
   checkpoint();
   Object.assign(project.config, result);
   Object.assign(project.route, result);
   update();
 });
-on("#add-entrant", "click", () => {
+action("add-entrant", () => {
   if (project.config.entrants.length >= 12)
     throw Error("A race supports at most 12 opponents");
   checkpoint();
@@ -1107,9 +1215,9 @@ on("#add-entrant", "click", () => {
   });
   update();
 });
-on("#force-player", "change", () => {
+action("force-player", () => {
   checkpoint();
-  if ($("#force-player").checked)
+  if (!project.config.player_vehicle)
     project.config.player_vehicle = {
       record: "Vehicle.v_standard2_archer_quartz",
       appearance: "default",
@@ -1117,7 +1225,7 @@ on("#force-player", "change", () => {
   else delete project.config.player_vehicle;
   update();
 });
-on("#layout", "click", async () => {
+action("layout", async () => {
   await routeQueue;
   const route = points();
   if (route.length < 2) throw Error("Draw at least two course points first");
@@ -1158,40 +1266,22 @@ on("#layout", "click", async () => {
     addMark("checkpoint", route[Math.floor(route.length / 2)]!.position, yaw);
   update();
 });
-for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]"))
-  b.onclick = () => {
-    document
-      .querySelectorAll<HTMLButtonElement>("[data-tab]")
-      .forEach((x) => x.classList.toggle("active", x === b));
-    for (const key of ["route", "grid", "rules", "series"])
-      $("#" + key + "-view").hidden = key !== b.dataset.tab;
-    document.querySelector<HTMLElement>(".heading")!.hidden =
-      b.dataset.tab === "series";
-    if (b.dataset.tab === "series") seriesEditor.render();
-    $("#projects").hidden = b.dataset.tab === "series";
-    $("#new").hidden = b.dataset.tab === "series";
-    $("#build").textContent =
-      b.dataset.tab === "series" ? "Build championship" : "Build";
-    $("#check").textContent =
-      b.dataset.tab === "series" ? "Check championship" : "Check race";
-    draw();
-  };
 function download(value: unknown, name: string) {
   const url = URL.createObjectURL(
       new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
     ),
-    a = el("a");
+    a = document.createElement("a");
   a.href = url;
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-on("#export", "click", async () => {
+action("export", async () => {
   await routeQueue;
   await flushSave();
   download(project.route, project.route.id + ".route.json");
 });
-on("#export-spec", "click", async () => {
+action("export-spec", async () => {
   await routeQueue;
   await flushSave();
   download(
@@ -1200,7 +1290,9 @@ on("#export-spec", "click", async () => {
   );
 });
 async function upload(): Promise<File | undefined> {
-  const input = $("#file");
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
   input.value = "";
   return await new Promise<File | undefined>((resolve) => {
     const finish = (file: File | undefined) => {
@@ -1215,7 +1307,7 @@ async function upload(): Promise<File | undefined> {
     input.click();
   });
 }
-on("#import", "click", async () => {
+action("import", async () => {
   await routeQueue;
   const file = await upload();
   if (!file) return;
@@ -1264,13 +1356,13 @@ function prepareRoadData() {
         ],
       };
     });
-  $("#network-summary").textContent =
+  view.network =
     network.topology === "native-traffic"
       ? `Native traffic network · ${lanes.length.toLocaleString()} drivable lanes · ${connections.length.toLocaleString()} junction connections${network.failures?.length ? " · " + network.failures.length + " reported failures" : ""}`
       : `Mesh fragments · ${network.roads.length.toLocaleString()} pieces · partial road coverage`;
-  $("#snap").checked = roads.length > 0;
+  view.snap = roads.length > 0;
 }
-on("#import-roads", "click", async () => {
+action("import-roads", async () => {
   const file = await upload();
   if (!file) return;
   const data: unknown = JSON.parse(await file.text());
@@ -1279,24 +1371,18 @@ on("#import-roads", "click", async () => {
   prepareRoads();
   fit();
 });
-on("#raw", "click", async () => {
+action("raw", async () => {
   await routeQueue;
-  const result = await dialog("Complete race authoring", (p) => {
-    p.append(
-      el(
-        "p",
-        "This edits the same route and settings, including all native layout overrides.",
-      ),
-    );
-    const text = modalField(
-      p,
-      "Route and settings JSON",
-      JSON.stringify(project, null, 2),
-      "textarea",
-    );
-    text.style.minHeight = "45vh";
-    return () => JSON.parse(text.value) as unknown;
-  });
+  const values = await ask("Complete race authoring", [
+    {
+      name: "Route and settings JSON",
+      type: "textarea",
+      value: JSON.stringify(project, null, 2),
+      required: true,
+    },
+  ]);
+  if (!values) return;
+  const result: unknown = JSON.parse(values["Route and settings JSON"]!);
   if (!result) return;
   await api("save", result);
   checkpoint();
@@ -1305,18 +1391,24 @@ on("#raw", "click", async () => {
   selected = null;
   update();
 });
-on("#tool-settings", "click", async () => {
-  const result = await dialog("Tool settings", (p) => {
-    const schema = modalField(p, "Reflection override (optional)", bootstrap.settings.schema),
-      game = modalField(p, "Game directory", bootstrap.settings.game);
-    return () => ({ schema: schema.value.trim(), game: game.value.trim() });
-  });
-  if (result) {
+action("tool-settings", async () => {
+  const values = await ask("Tool settings", [
+    {
+      name: "Reflection override (optional)",
+      value: bootstrap.settings.schema,
+    },
+    { name: "Game directory", value: bootstrap.settings.game },
+  ]);
+  if (values) {
+    const result = {
+      schema: values["Reflection override (optional)"]!.trim(),
+      game: values["Game directory"]!.trim(),
+    };
     await api("settings", result);
     bootstrap.settings = result;
   }
 });
-on("#check", "click", async () => {
+action("check", async () => {
   if (showingSeries()) return seriesEditor.check();
   await routeQueue;
   const result = await api("check", project);
@@ -1329,7 +1421,7 @@ async function build(native: boolean) {
   await routeQueue;
   await flushSave();
   const result = await api("build", { ...project, native });
-  $("#build").disabled = true;
+  view.busy = true;
   notice("Generating race resources…");
   clearInterval(jobTimer);
   jobTimer = setInterval(async () => {
@@ -1337,7 +1429,7 @@ async function build(native: boolean) {
       const job = await api(`job/${result.job}`);
       if (job.status === "running") return;
       clearInterval(jobTimer);
-      $("#build").disabled = false;
+      view.busy = false;
       notice(
         job.status === "complete"
           ? `${job.native ? "Native build" : "Resource documents"} complete · ${job.resources} resources`
@@ -1345,43 +1437,25 @@ async function build(native: boolean) {
         job.status === "failed",
       );
       if (job.status === "complete" && job.native) {
-        const link = el("a", "Download mod ZIP", "download");
-        link.href = "/api/job/" + result.job + "/download";
-        link.style.color = "inherit";
-        $("#notice").append(document.createTextNode(" · "), link);
+        view.download = "/api/job/" + result.job + "/download";
+        changed();
       }
     } catch (error) {
       clearInterval(jobTimer);
-      $("#build").disabled = false;
+      view.busy = false;
       notice(errorMessage(error), true);
     }
   }, 1000);
 }
-on("#build", "click", () => build(true));
-on("#docs-build", "click", () => build(false));
+action("build", () => build(true));
+action("docs-build", () => build(false));
 async function boot() {
-  const controls = [
-    ...document.querySelectorAll<
-      HTMLButtonElement | HTMLInputElement | HTMLSelectElement
-    >("button,input,select"),
-  ];
-  controls.forEach((c) => (c.disabled = true));
-  canvas.style.pointerEvents = "none";
-  $("#save-status").textContent = "Loading roads…";
+  view.status = "Loading roads…";
+  changed();
   bootstrap = await api("bootstrap");
-  for (const role of bootstrap.roles)
-    if (role !== "spline_point")
-      $("#role").append(new Option(words(role), role));
   network = await api("roads");
   prepareRoads();
-  const vehicles = await api("vehicles");
-  for (const v of vehicles) {
-    const record = v.record || v.record_id || v.id;
-    if (typeof record === "string" && record.startsWith("Vehicle.")) {
-      const option = new Option(v.name || record, record);
-      $("#vehicle-records").append(option);
-    }
-  }
+  vehicles = await api("vehicles");
   let saved: SavedView | null = null;
   try {
     saved = JSON.parse(
@@ -1392,7 +1466,7 @@ async function boot() {
     ? saved!.project
     : bootstrap.projects[0]?.id;
   project = key ? await api(`project/${key}`) : newProject();
-  controls.forEach((c) => (c.disabled = false));
+  view.ready = true;
   canvas.style.pointerEvents = "";
   if (
     saved?.project === project.route.id &&
@@ -1406,6 +1480,6 @@ async function boot() {
   if (saved?.project !== project.route.id) fit();
   setMode(points().length ? "edit" : "draw");
   await seriesEditor.init();
-  $("#save-status").textContent = "Ready";
+  view.status = "Ready";
+  changed();
 }
-boot().catch((e) => notice(errorMessage(e), true));
