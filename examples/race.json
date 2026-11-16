@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "example_race",
+  "title": "Example Race",
+  "description": "Illustrative geometry; survey and verify a real road before playing.",
+  "route": "route.json",
+  "checkpoint_spacing_m": 40,
+  "entrants": [{"id": "racer_one", "grid": 0, "vehicle": "Vehicle.v_standard2_archer_quartz", "driver": "Character.sq024_city_race_corpo_racer"}]
+}

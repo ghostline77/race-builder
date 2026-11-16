@@ -1,0 +1,25 @@
+[package]
+name = "ghostline-race-builder"
+version = "0.1.0"
+edition = "2024"
+description = "Native Cyberpunk 2077 race authoring, road routing and compilation"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
+ghostline-quest-builder = { path = "../quest-builder" }
+ghostline-red = { path = "../ghostline-red" }
+glam = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "unbounded_depth"] }
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "net"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
