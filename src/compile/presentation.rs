@@ -89,7 +89,7 @@ impl Scene {
             dest,
         );
     }
-    fn fact_wait(&mut self, number: u64, fact: &str, target: u64, ordinal: u64) {
+    fn fact_wait(&mut self, number: u64, fact: &str, destinations: &[(u64, u64, u64)]) {
         let kind=self.h.wrap(json!({"$type":"questVarComparison_ConditionType","factName":fact,"comparisonType":"Greater","value":0}));
         let condition = self
             .h
@@ -100,7 +100,7 @@ impl Scene {
             &["CutDestination", "In"],
             &["Out"],
             json!({"condition":condition}),
-            &[(target, 0, ordinal)],
+            destinations,
         );
     }
     fn delay(&mut self, number: u64, ms: u64, dest: &[(u64, u64, u64)]) {
@@ -370,7 +370,7 @@ pub fn activation(config: &Value, b: &Value, depot: &str) -> Result<Value> {
     s.end(97, "fade_out", true);
     s.transition(101,99,1750,0,vec![json!({"$type":"scneventsSocket","startTime":510,"duration":0,"osockStamp":{"$type":"scnOutputSocketStamp","name":2,"ordinal":0}})],&[(2,111,1)],false);
     s.tier(111, "Tier2_StagedGameplay", &[]);
-    s.fact_wait(99, &format!("{ns}_crowd_spawned"), 140, 1);
+    s.fact_wait(99, &format!("{ns}_crowd_spawned"), &[(140, 0, 1)]);
     s.delay(140, 2000, &[(146, 0, 1)]);
     let target=s.h.wrap(json!({"$type":"questUniversalRef","entityReference":n::entity(None,&[]),"mainPlayerObject":0,"refLocalPlayer":1}));
     let destination=s.h.wrap(json!({"$type":"questUniversalRef","entityReference":entity(crate::route::text(b,"activation")?,&[]),"mainPlayerObject":0,"refLocalPlayer":0}));
@@ -515,7 +515,6 @@ pub fn compile(config: &Value, b: &Value, depot: &str, result: bool) -> Result<V
         result_localization(&mut s);
     } else {
         s.start(1, "announcer_in", 12, 0);
-        s.start(176, "countdown_in", 189, 1);
         s.end(26, "announcer_out", false);
         s.end(10, "countdown_go", true);
         s.end(16, "countdown_started", true);
@@ -535,11 +534,14 @@ pub fn compile(config: &Value, b: &Value, depot: &str, result: bool) -> Result<V
             2,
             false,
         );
-        // The announcer/inside-car branch supplies the other AND input;
-        // countdown_in already supplies input 1.
-        s.fact_wait(195, &format!("{ns}_inside_car"), 189, 0);
-        s.node(json!({"$type":"scnAndNode","nodeId":id("scnNodeId",189),"ffStrategy":"automatic","numInSockets":2,"outputSockets":[socket(0,0,&[(18,666,1)])]}));
-        s.node(json!({"$type":"scnDeletionMarkerNode","nodeId":id("scnNodeId",18),"ffStrategy":"allow_fully","outputSockets":[socket(666,0,&[(14,0,0),(16,0,0),(28,0,1),(38,0,1)])]}));
+        // Boarding can finish long after the announcer. Read the saved readiness
+        // facts in this scene entry so the two events can arrive in either order.
+        s.fact_wait(195, &format!("{ns}_countdown_requested"), &[(189, 0, 1)]);
+        s.fact_wait(
+            189,
+            &format!("{ns}_opponents_mounted"),
+            &[(14, 0, 0), (16, 0, 0), (28, 0, 1), (38, 0, 1)],
+        );
         s.manager(28,"questAudioNodeDefinition",json!({"$type":"questAudioMixNodeType","mixSignpost":n::cname("sq024_city_race_countdown_start")}),&[]);
         let mut events=vec![s.h.wrap(json!({"$type":"scneventsSocket","startTime":0,"duration":0,"id":{"$type":"scnSceneEventId","id":hash(&format!("{ns}:14:2")).to_string()},"osockStamp":{"$type":"scnOutputSocketStamp","name":2,"ordinal":0}}))];
         events.extend(

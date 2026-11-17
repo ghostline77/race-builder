@@ -374,17 +374,12 @@ pub(super) fn compile(
     let countdown = b.scene(
         binding(bindings, "countdown_scene")?,
         binding(bindings, "activation")?,
-        &["announcer_in", "countdown_in"],
+        &["announcer_in"],
         &["countdown_go", "announcer_out", "countdown_started"],
     )?;
     let mut announce = source;
     step!(b, announce, delay(1.));
     b.link(announce, countdown, "announcer_in")?;
-    let request = b.fact_condition(&format!("{ns}_countdown_requested"), "Greater", 0, false)?;
-    b.link(source, request, "In")?;
-    let boarded = b.fact_condition(&format!("{ns}_opponents_mounted"), "Greater", 0, false)?;
-    b.link(request, boarded, "In")?;
-    b.link(boarded, countdown, "countdown_in")?;
     let mut started = b.cut(Builder::out(countdown, 2), &staging_targets, false)?;
     step!(b, started, fact(&format!("{ns}_countdown_started"), 1));
     let attempt = b.child(
@@ -397,7 +392,6 @@ pub(super) fn compile(
         activation,
         attempt,
         countdown,
-        request,
         announce,
         approach,
         outside,

@@ -339,3 +339,55 @@ fn native_gps_only_road_turns_are_kept_for_race_splines() {
     assert!(points.iter().any(|p| p["x"] == 14. && p["y"] == 2.));
     assert_eq!(graph.network["roads"][1]["drivable"], true);
 }
+
+#[test]
+fn countdown_waits_for_boarding_and_opponents_after_the_announcer() {
+    let (config, route) = example();
+    let (build, bindings, _) = compile::documents(&config, &route).unwrap();
+    let scene =
+        &build.artifacts[bindings["countdown_scene"].as_str().unwrap()]["Data"]["RootChunk"];
+    let nodes = scene["sceneGraph"]["Data"]["graph"].as_array().unwrap();
+    let node = |id: u64| {
+        nodes
+            .iter()
+            .map(|n| &n["Data"])
+            .find(|n| n["nodeId"]["id"] == id)
+            .unwrap()
+    };
+    let next = |n: &Value| {
+        n["outputSockets"][0]["destinations"][0]["nodeId"]["id"]
+            .as_u64()
+            .unwrap()
+    };
+    let entries = scene["entryPoints"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    let start = node(entries[0]["nodeId"]["id"].as_u64().unwrap());
+    let dialogue = node(next(start));
+    assert_eq!(dialogue["$type"], "scnSectionNode");
+    let mut gate = node(next(dialogue));
+    for fact in ["countdown_requested", "opponents_mounted"] {
+        let condition = &gate["questNode"]["Data"]["condition"]["Data"]["type"]["Data"];
+        assert_eq!(
+            condition["factName"],
+            format!("{}_{fact}", config["id"].as_str().unwrap())
+        );
+        assert_eq!(condition["comparisonType"], "Greater");
+        assert_eq!(condition["value"], 0);
+        if fact == "countdown_requested" {
+            gate = node(next(gate));
+        }
+    }
+    let started = scene["exitPoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|exit| exit["name"]["$value"] == "countdown_started")
+        .unwrap();
+    assert!(
+        gate["outputSockets"][0]["destinations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|target| target["nodeId"] == started["nodeId"])
+    );
+}
