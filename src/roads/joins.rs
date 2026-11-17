@@ -103,7 +103,7 @@ pub(super) fn path(points: Vec<[f64; 3]>) -> Vec<[f64; 3]> {
     output
 }
 
-/// Bound native tracking spans after generated grid approaches have been added.
+/// Subdivide reference paths without changing their geometry or stations.
 pub(crate) fn subdivide(points: &[[f64; 3]]) -> Vec<[f64; 3]> {
     let mut output = Vec::new();
     for pair in points.windows(2) {
@@ -148,8 +148,8 @@ pub(crate) fn route(route: &Value) -> Result<Value> {
         cursor = end;
     }
     rebuilt.extend(marks[cursor..].iter().map(|m| (*m).clone()));
-    // Native racing progression must not jump across a hundred-metre control
-    // span. Subdivision changes neither the authored polyline nor its stations.
+    // Give spline fitting a dense reference without changing the authored
+    // polyline or its stations.
     let mut dense = Vec::new();
     for (i, mark) in rebuilt.iter().enumerate() {
         dense.push(mark.clone());

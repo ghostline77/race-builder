@@ -617,7 +617,7 @@ dependencies = [
 [[package]]
 name = "ghostline-quest-builder"
 version = "0.1.0"
-source = "git+https://github.com/ghostline77/quest-builder#a2d44f96319e4033cbe9f5a651a3870a84f48a34"
+source = "git+https://github.com/ghostline77/quest-builder#e134701fc6062c2b1cce2f6a15ea67d8daf3a616"
 dependencies = [
  "anyhow",
  "axum",
@@ -656,7 +656,7 @@ dependencies = [
 [[package]]
 name = "ghostline-red"
 version = "0.1.0"
-source = "git+https://github.com/ghostline77/ghostline-red#c278de6ef37870239d2cbcb79033bf758e08ea29"
+source = "git+https://github.com/ghostline77/ghostline-red#5246bc73356b755ab8ee8f6bf444d417aafdd9b6"
 dependencies = [
  "aho-corasick",
  "anyhow",

@@ -51,8 +51,10 @@ stops the build with its reference and coordinates. Generated bindings include a
 
 Following roads blends short sideways lane joins into gradual transitions. Saved
 generated routes receive the same treatment during compilation, preserving authored
-anchors and genuine turns. Native spline spans are subdivided to at most ten metres
-without moving the route, so racing progression does not depend on sparse lane vertices.
+anchors and genuine turns. Generated racing splines use explicit manual Bezier handles with smooth joints.
+Control points are fitted within 1.5 metres of the prepared route; authored
+Bezier overrides retain their handles. Guidance and checkpoints keep their
+authored course positions.
 
 **Advanced → Import route / Game Scout export** accepts shared routes, existing
 Game Scout `race-plan.json` exports and saved race records. Imported native

@@ -470,7 +470,7 @@ pub fn author(config: &Value, survey: &Value) -> Result<(Value, Value)> {
     }
     dressing(&mut world, &mut bindings, &waiting, &finish)?;
     // The grid approach is generated after route preparation. Subdivide here
-    // as well so its spans have the same native tracking resolution as the course.
+    // as well so spline fitting and course coverage use the same reference density.
     for key in ["race_splines", "splines"] {
         for row in world[key].as_array_mut().into_iter().flatten() {
             // Explicit world-spec control points can carry custom Bezier handles.
@@ -499,6 +499,14 @@ pub fn author(config: &Value, survey: &Value) -> Result<(Value, Value)> {
         }
     }
     bindings["course_areas"] = json!(course_areas(&mut world, ns)?);
+    for row in world["race_splines"].as_array_mut().into_iter().flatten() {
+        super::spline::prepare(row)?;
+    }
+    for row in world["splines"].as_array_mut().into_iter().flatten() {
+        if row["ref"] == driving {
+            super::spline::prepare(row)?;
+        }
+    }
     Ok((world, bindings))
 }
 /// Bound short stretches of road separately so adjacent decks can stay distinct.

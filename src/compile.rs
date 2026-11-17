@@ -14,6 +14,8 @@ mod presentation;
 #[path = "compile/resources.rs"]
 mod resources;
 mod series_resources;
+#[path = "compile/spline.rs"]
+mod spline;
 mod validation;
 #[path = "compile/world.rs"]
 mod world;

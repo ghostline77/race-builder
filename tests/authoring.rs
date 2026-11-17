@@ -408,6 +408,7 @@ fn off_course_detection_uses_route_volumes_in_both_directions() {
     let spline = &world["race_splines"][0];
     let origin = &spline["position"];
     for p in spline["points"].as_array().unwrap() {
+        let p = p.get("position").unwrap_or(p);
         let x = origin["x"].as_f64().unwrap() + p[0].as_f64().unwrap();
         let y = origin["y"].as_f64().unwrap() + p[1].as_f64().unwrap();
         let z = origin["z"].as_f64().unwrap() + p[2].as_f64().unwrap();
