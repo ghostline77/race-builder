@@ -498,8 +498,76 @@ pub fn author(config: &Value, survey: &Value) -> Result<(Value, Value)> {
             row["points"] = json!(dense);
         }
     }
+    bindings["course_areas"] = json!(course_areas(&mut world, ns)?);
     Ok((world, bindings))
 }
+/// Bound short stretches of road separately so adjacent decks can stay distinct.
+fn course_areas(world: &mut Value, ns: &str) -> Result<Vec<String>> {
+    let course = &world["race_splines"][0];
+    let origin = position(&course["position"])?;
+    let mut points = course["points"]
+        .as_array()
+        .context("race spline points")?
+        .iter()
+        .map(array_point)
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        points.len() >= 2,
+        "Course coverage needs at least two points"
+    );
+    if course["looped"] == true {
+        points.push(points[0]);
+    }
+    let mut refs = Vec::new();
+    let mut start = 0;
+    while start + 1 < points.len() {
+        let mut end = start + 1;
+        let mut length = distance(points[start], points[end]);
+        while end + 1 < points.len() {
+            let next = points[end + 1];
+            let next_length = length + distance(points[end], next);
+            if next_length > 32.0 || (next[2] - points[start][2]).abs() > 3.0 {
+                break;
+            }
+            end += 1;
+            length = next_length;
+        }
+        let a = points[start];
+        let b = points[end];
+        let angle = (b[0] - a[0]).atan2(b[1] - a[1]);
+        let (sin, cos) = angle.sin_cos();
+        let mut low = [f64::INFINITY; 3];
+        let mut high = [f64::NEG_INFINITY; 3];
+        for p in &points[start..=end] {
+            let coordinates = [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos, p[2]];
+            for axis in 0..3 {
+                low[axis] = low[axis].min(coordinates[axis]);
+                high[axis] = high[axis].max(coordinates[axis]);
+            }
+        }
+        let side = (low[0] + high[0]) / 2.0;
+        let ahead = (low[1] + high[1]) / 2.0;
+        let base = [
+            origin[0] + side * cos + ahead * sin,
+            origin[1] - side * sin + ahead * cos,
+            origin[2] + low[2] - 3.0,
+        ];
+        let reference = format!("#{ns}_course_area_{:04}", refs.len());
+        area(
+            world,
+            &reference,
+            base,
+            -angle.to_degrees(),
+            high[0] - low[0] + 50.0,
+            high[1] - low[1] + 24.0,
+            high[2] - low[2] + 8.0,
+        );
+        refs.push(reference);
+        start = end;
+    }
+    Ok(refs)
+}
+
 fn array_point(v: &Value) -> Result<[f64; 3]> {
     Ok([
         v[0].as_f64().context("spline x")?,

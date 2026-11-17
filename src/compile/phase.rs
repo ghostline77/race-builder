@@ -384,15 +384,38 @@ impl Builder {
         self.manager("questUIManagerNodeDefinition",json!({"$type":"questShowCustomTooltip_NodeType","setTooltip":show,"text":{"unk1":"0","value":"LocKey#50189"},"inputAction":"Exit","holdIndicationType":"Hold"}))
     }
     fn course(&mut self, b: &Value, outside: bool) -> Result<Signal> {
-        let kind=self.g.wrap(json!({"$type":"questVarComparison_ConditionType","factName":"RacePlayerDistanceFromSpline","comparisonType":if outside{"GreaterOrEqual"}else{"Less"},"value":if outside{50}else{40}}));
-        let mut conditions = vec![
-            self.g
-                .wrap(json!({"$type":"questFactsDBCondition","type":kind})),
-        ];
-        for reference in b["water_areas"].as_array().into_iter().flatten() {
-            conditions.push(self.g.wrap(json!({"$type":"questTriggerCondition","triggerAreaRef":n::node_ref(reference.as_str().context("water reference")?),"activatorRef":entity(crate::route::text(b,"player_vehicle")?,&[]),"isPlayerActivator":0,"type":if outside{"IsInside"}else{"IsOutside"}})));
+        let areas = b["course_areas"].as_array().context("course areas")?;
+        anyhow::ensure!(!areas.is_empty(), "Cannot monitor an empty course");
+        let mut road = Vec::with_capacity(areas.len());
+        for reference in areas {
+            road.push(self.g.wrap(json!({
+                "$type": "questTriggerCondition",
+                "triggerAreaRef": n::node_ref(reference.as_str().context("course area reference")?),
+                "activatorRef": entity("#player", &[]),
+                "isPlayerActivator": 1,
+                "type": if outside { "IsOutside" } else { "IsInside" }
+            })));
         }
-        self.condition(json!({"$type":"questLogicalCondition","operation":if outside{"OR"}else{"AND"},"conditions":conditions}),false)
+        let coverage = json!({
+            "$type": "questLogicalCondition",
+            "operation": if outside { "AND" } else { "OR" },
+            "conditions": road
+        });
+        let mut conditions = vec![self.g.wrap(coverage)];
+        for reference in b["water_areas"].as_array().into_iter().flatten() {
+            conditions.push(self.g.wrap(json!({
+                "$type": "questTriggerCondition",
+                "triggerAreaRef": n::node_ref(reference.as_str().context("water reference")?),
+                "activatorRef": entity(crate::route::text(b,"player_vehicle")?, &[]),
+                "isPlayerActivator": 0,
+                "type": if outside { "IsInside" } else { "IsOutside" }
+            })));
+        }
+        self.condition(json!({
+            "$type": "questLogicalCondition",
+            "operation": if outside { "OR" } else { "AND" },
+            "conditions": conditions
+        }), false)
     }
     fn drive(
         &mut self,

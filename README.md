@@ -166,6 +166,8 @@ uses a file and an in-memory routing graph; no database is needed.
 
 ## Generated races
 
+The builder places overlapping native trigger volumes along the race spline, including the grid approach and the closing segment of a looped course. Leaving every volume or entering an authored water area starts the return warning. Re-entering the road outside water during the two-second grace period cancels automatic recovery. Test one deliberate departure and re-entry when validating a course with stacked roads or steep elevation changes.
+
 Resources are generated directly: standing activation, preparation, countdown,
 crew spawning and mounting, ordered checkpoints and HUD, opponent driving and
 rubberbanding, recovery, finish/failure handling, rewards, courier, cleanup and

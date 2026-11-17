@@ -391,3 +391,74 @@ fn countdown_waits_for_boarding_and_opponents_after_the_announcer() {
             .any(|target| target["nodeId"] == started["nodeId"])
     );
 }
+
+#[test]
+fn off_course_detection_uses_route_volumes_in_both_directions() {
+    let (config, route) = example();
+    let (build, bindings, world) = compile::documents(&config, &route).unwrap();
+    let refs = bindings["course_areas"].as_array().unwrap();
+    let volumes: Vec<_> = world["triggers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|trigger| refs.contains(&trigger["ref"]))
+        .collect();
+    assert!(!volumes.is_empty());
+    assert_eq!(volumes.len(), refs.len());
+    let spline = &world["race_splines"][0];
+    let origin = &spline["position"];
+    for p in spline["points"].as_array().unwrap() {
+        let x = origin["x"].as_f64().unwrap() + p[0].as_f64().unwrap();
+        let y = origin["y"].as_f64().unwrap() + p[1].as_f64().unwrap();
+        let z = origin["z"].as_f64().unwrap() + p[2].as_f64().unwrap();
+        assert!(volumes.iter().any(|v| {
+            let (s, c) = v["yaw"].as_f64().unwrap().to_radians().sin_cos();
+            let dx = x - v["position"]["x"].as_f64().unwrap();
+            let dy = y - v["position"]["y"].as_f64().unwrap();
+            let dz = z - v["position"]["z"].as_f64().unwrap();
+            let b = &v["outline"];
+            (dx * c + dy * s).abs() <= b["width"].as_f64().unwrap() / 2.0
+                && (-dx * s + dy * c).abs() <= b["depth"].as_f64().unwrap() / 2.0
+                && (0.0..=b["height"].as_f64().unwrap()).contains(&dz)
+        }));
+    }
+    let phase = &build.artifacts[bindings["attempt_phase"].as_str().unwrap()];
+    fn check(v: &Value, refs: &[Value], branches: &mut Vec<String>) {
+        if v["$type"] == "questLogicalCondition" {
+            let terms = v["conditions"].as_array().unwrap();
+            if terms
+                .first()
+                .is_some_and(|term| term["Data"]["triggerAreaRef"]["$value"] == refs[0])
+            {
+                assert_eq!(terms.len(), refs.len());
+                let operation = v["operation"].as_str().unwrap();
+                for (term, reference) in terms.iter().zip(refs) {
+                    let term = &term["Data"];
+                    assert_eq!(term["triggerAreaRef"]["$value"], *reference);
+                    assert_eq!(
+                        term["type"],
+                        if operation == "AND" {
+                            "IsOutside"
+                        } else {
+                            "IsInside"
+                        }
+                    );
+                }
+                branches.push(operation.to_owned());
+            }
+        }
+        if let Some(obj) = v.as_object() {
+            for child in obj.values() {
+                check(child, refs, branches);
+            }
+        } else if let Some(arr) = v.as_array() {
+            for child in arr {
+                check(child, refs, branches);
+            }
+        }
+    }
+    let mut branches = Vec::new();
+    check(phase, refs, &mut branches);
+    branches.sort();
+    assert_eq!(branches, ["AND", "OR"]);
+}
