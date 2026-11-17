@@ -12,6 +12,58 @@ fn example() -> (Value, Value) {
 }
 
 #[test]
+fn opponent_vehicle_staging_protection_is_removed_in_the_attempt() {
+    fn collect<'a>(value: &'a Value, kind: &str, found: &mut Vec<&'a Value>) {
+        if value["$type"] == kind {
+            found.push(value);
+        }
+        match value {
+            Value::Object(object) => {
+                for child in object.values() {
+                    collect(child, kind, found);
+                }
+            }
+            Value::Array(array) => {
+                for child in array {
+                    collect(child, kind, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    for ownership in ["population", "community", "scene"] {
+        let (mut config, route) = example();
+        config["actor_ownership"] = json!(ownership);
+        let (build, bindings, _) = compile::documents(&config, &route).unwrap();
+        let preparation = &build.artifacts[bindings["preparation_phase"].as_str().unwrap()];
+        let attempt = &build.artifacts[bindings["attempt_phase"].as_str().unwrap()];
+        let mut doors = Vec::new();
+        collect(preparation, "questToggleDoor_NodeType", &mut doors);
+        let vehicles: Vec<_> = doors
+            .iter()
+            .filter(|node| node["doorAction"] == "DisableAllInteractions")
+            .filter(|node| node["vehicleRef"]["reference"]["$value"] != bindings["player_vehicle"])
+            .map(|node| &node["vehicleRef"])
+            .collect();
+        assert_eq!(vehicles.len(), config["entrants"].as_array().unwrap().len());
+        for (phase, state) in [(preparation, "Immortal"), (attempt, "Mortal")] {
+            let mut mortality = Vec::new();
+            collect(phase, "questCharacterManagerParameters_SetMortality", &mut mortality);
+            for vehicle in &vehicles {
+                let commands: Vec<_> = mortality
+                    .iter()
+                    .filter(|node| &node["puppetRef"] == *vehicle)
+                    .collect();
+                assert_eq!(commands.len(), 1, "{ownership}: {state}");
+                assert_eq!(commands[0]["state"], state);
+                assert_eq!(commands[0]["source"]["$value"], config["id"]);
+                assert_eq!(commands[0]["resetToDefault"], 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn authored_speed_changes_survive_race_compilation() {
     let (config, mut route) = example();
     route["speed_mps"] = json!(30.);

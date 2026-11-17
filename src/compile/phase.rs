@@ -360,7 +360,16 @@ impl Builder {
                 "default",
             );
         }
-        let subtype=self.g.wrap(json!({"$type":"questCharacterManagerParameters_SetMortality","puppetRef":entity(reference,&[]),"isPlayer":i32::from(player),"state":if enable{"Immortal"}else{"Mortal"},"source":n::cname(ns),"resetToDefault":0}));
+        self.actor_mortality(ns, entity(reference, &[]), enable, player)
+    }
+    fn actor_mortality(
+        &mut self,
+        ns: &str,
+        actor: Value,
+        enable: bool,
+        player: bool,
+    ) -> Result<Signal> {
+        let subtype=self.g.wrap(json!({"$type":"questCharacterManagerParameters_SetMortality","puppetRef":actor,"isPlayer":i32::from(player),"state":if enable{"Immortal"}else{"Mortal"},"source":n::cname(ns),"resetToDefault":0}));
         self.manager(
             "questCharacterManagerNodeDefinition",
             json!({"$type":"questCharacterManagerParameters_NodeType","subtype":subtype}),

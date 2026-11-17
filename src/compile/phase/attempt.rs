@@ -141,6 +141,14 @@ pub(super) fn compile(
     );
     step!(b, source, restriction(ns, "countdown", true));
     step!(b, source, restriction(ns, "preparation", false));
+    // Staging protection ends at GO; crew protection keeps its separate grace period.
+    for entrant in entrants {
+        step!(
+            b,
+            source,
+            actor_mortality(ns, crew(bindings, entrant, "vehicle")?, false, false)
+        );
+    }
     step!(
         b,
         source,

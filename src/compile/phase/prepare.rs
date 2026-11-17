@@ -154,6 +154,14 @@ pub(super) fn compile(
     step!(b, source, delay(0.2));
     step!(b, source, delay(1.));
     step!(b, source, mortality(ns, community, true, false));
+    // Population and scene cast commands cover NPCs; protect their vehicles explicitly.
+    for entrant in bindings["entrants"].as_array().context("entrants")? {
+        step!(
+            b,
+            source,
+            actor_mortality(ns, crew(bindings, entrant, "vehicle")?, true, false)
+        );
+    }
     // Protect the resolved race car while it is spawned and V is still on foot.
     step!(b, source, mortality(ns, player, true, false));
     source = attitude(
